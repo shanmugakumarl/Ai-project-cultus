@@ -1,0 +1,239 @@
+import numpy as np
+import pandas as pd
+import torch
+from torch import nn
+from torch.utils.data import Dataset, DataLoader
+import statsmodels.api as sm
+from prophet import Prophet
+import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings("ignore")
+
+# ============================================================
+# 1. DATA GENERATOR
+# ============================================================
+
+def generate_complex_multivariate_ts(n=1500, seed=42):
+    """
+    Generates a synthetic multivariate time series with:
+    - Trend
+    - Seasonality (daily + weekly)
+    - Structural breaks
+    - Exogenous signals
+    """
+    np.random.seed(seed)
+    t = np.arange(n)
+
+    # Trend (piecewise)
+    trend = 0.01 * t
+    trend[t > int(0.6*n)] += 0.03*(t[t > int(0.6*n)] - int(0.6*n))
+
+    # Seasonalities
+    daily = 10*np.sin(2*np.pi*t/24)
+    weekly = 5*np.sin(2*np.pi*t/168)
+
+    # Noise
+    noise = np.random.normal(0, 1, n)
+
+    # Outliers
+    outliers = np.zeros(n)
+    idx = np.random.choice(range(50, n-50), size=5, replace=False)
+    outliers[idx] = np.random.choice([15, -20, 25], size=5)
+
+    y = 50 + trend + daily + weekly + noise + outliers
+
+    # 2 Exogenous variables
+    ex1 = 0.8*np.sin(2*np.pi*t/12) + np.random.normal(0,0.5,n)
+    ex2 = 0.5*np.cos(2*np.pi*t/30) + np.random.normal(0,0.3,n)
+
+    df = pd.DataFrame({
+        "y": y,
+        "ex1": ex1,
+        "ex2": ex2
+    })
+    return df
+
+# ============================================================
+# 2. N-BEATS MODEL
+# ============================================================
+
+class NBeatsBlock(nn.Module):
+    def __init__(self, in_dim, theta_dim, hidden_dim=256, layers=4):
+        super().__init__()
+        fc = []
+        for _ in range(layers):
+            fc += [nn.Linear(in_dim if _==0 else hidden_dim, hidden_dim), nn.ReLU()]
+        self.fc = nn.Sequential(*fc)
+        self.theta = nn.Linear(hidden_dim, theta_dim)
+
+    def forward(self, x):
+        return self.theta(self.fc(x))
+
+
+class NBeats(nn.Module):
+    def __init__(self, backcast, forecast, n_vars):
+        super().__init__()
+        input_dim = backcast * n_vars
+        self.backcast = backcast
+        self.forecast = forecast
+        self.n_vars = n_vars
+
+        self.blocks = nn.ModuleList([
+            NBeatsBlock(input_dim, backcast + forecast),
+            NBeatsBlock(input_dim, backcast + forecast),
+            NBeatsBlock(input_dim, backcast + forecast)
+        ])
+
+    def forward(self, x):
+        """
+        x: (batch, backcast, n_vars)
+        """
+        b = x.shape[0]
+        x_flat = x.view(b, -1)
+        forecast_total = torch.zeros((b, self.forecast), device=x.device)
+
+        for block in self.blocks:
+            theta = block(x_flat)
+            backcast = theta[:, :self.backcast]
+            forecast = theta[:, self.backcast:]
+            forecast_total += forecast
+            x_flat = x_flat - backcast.repeat(1, self.n_vars)
+
+        return forecast_total
+
+# ============================================================
+# 3. DATASET WINDOWING
+# ============================================================
+
+class WindowDataset(Dataset):
+    def __init__(self, df, backcast=60, forecast=24):
+        self.X, self.Y = [], []
+        values = df.values
+        for i in range(len(values) - backcast - forecast):
+            x = values[i:i+backcast]
+            y = values[i+backcast:i+backcast+forecast, 0]  # target y
+            self.X.append(x)
+            self.Y.append(y)
+        self.X, self.Y = np.array(self.X), np.array(self.Y)
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, i):
+        return torch.tensor(self.X[i], dtype=torch.float32), torch.tensor(self.Y[i], dtype=torch.float32)
+
+# ============================================================
+# 4. TRAINING
+# ============================================================
+
+def train_model(model, train_loader, val_loader, epochs=30, lr=1e-3, device='cpu'):
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
+    best_loss = 999999
+
+    for ep in range(epochs):
+        model.train()
+        for x, y in train_loader:
+            x,y = x.to(device), y.to(device)
+            opt.zero_grad()
+            pred = model(x)
+            loss = nn.MSELoss()(pred, y)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            opt.step()
+        scheduler.step()
+
+        # validation
+        model.eval()
+        losses = []
+        with torch.no_grad():
+            for x,y in val_loader:
+                x,y = x.to(device), y.to(device)
+                pred = model(x)
+                losses.append(nn.MSELoss()(pred, y).item())
+        val_loss = np.mean(losses)
+
+        print(f"Epoch {ep+1}/{epochs} - val_loss = {val_loss:.4f}")
+        if val_loss < best_loss:
+            best_loss = val_loss
+            torch.save(model.state_dict(), "best_nbeats.pth")
+
+    model.load_state_dict(torch.load("best_nbeats.pth"))
+    return model
+
+# ============================================================
+# 5. DECOMPOSITION (INTERNAL INTERPRETABILITY)
+# ============================================================
+
+def decompose(model, x):
+    """
+    Returns each block's forecast contribution.
+    """
+    model.eval()
+    contributions = []
+    x_flat = x.view(1, -1)
+
+    for block in model.blocks:
+        theta = block(x_flat)
+        forecast = theta[:, model.backcast:].detach().numpy().flatten()
+        contributions.append(forecast)
+        backcast = theta[:, :model.backcast]
+        x_flat = x_flat - backcast.repeat(1, model.n_vars)
+
+    return contributions
+
+# ============================================================
+# 6. BENCHMARK MODELS
+# ============================================================
+
+def benchmark_sarima(series, forecast=24):
+    preds = []
+    train = series[:-forecast]
+    model = sm.tsa.ARIMA(train, order=(2,1,2)).fit()
+    preds = model.forecast(forecast)
+    return preds
+
+def benchmark_prophet(df, forecast=24):
+    dfp = df.reset_index().rename(columns={"index": "ds", "y": "y"})
+    m = Prophet(daily_seasonality=True, weekly_seasonality=True)
+    m.fit(dfp[:-forecast])
+    future = m.make_future_dataframe(forecast, freq='H')
+    out = m.predict(future)
+    return out["yhat"].iloc[-forecast:].values
+
+# ============================================================
+# 7. MAIN EXECUTION PIPELINE
+# ============================================================
+
+if __name__ == "__main__":
+    df = generate_complex_multivariate_ts()
+    # FIX: Assign a datetime index to the DataFrame for Prophet
+    df.index = pd.to_datetime(pd.date_range(start='2023-01-01', periods=len(df), freq='H'))
+    print("Dataset shape:", df.shape)
+
+    BACKCAST = 60
+    FORECAST = 24
+
+    ds = WindowDataset(df, BACKCAST, FORECAST)
+    train_size = int(0.8 * len(ds))
+    val_size = len(ds) - train_size
+    train_dataset, val_dataset = torch.utils.data.random_split(ds, [train_size, val_size])
+
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    model = NBeats(backcast=BACKCAST, forecast=FORECAST, n_vars=3).to(device)
+    model = train_model(model, train_loader, val_loader, epochs=10, lr=1e-3, device=device)
+
+    # get a sample
+    x_sample, y_sample = ds[100]
+    contributions = decompose(model, x_sample.unsqueeze(0).to(device))
+
+    print("Block forecast contributions extracted successfully.")
+
+    # Benchmarks
+    sarima_pred = benchmark_sarima(df['y'])
+    prophet_pred = benchmark_prophet(df[['y']])
+    print("Benchmarks finished.")
