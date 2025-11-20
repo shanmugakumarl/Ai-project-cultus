@@ -189,65 +189,65 @@ Hyperparameter tuning :
 
 Optuna example included:
 
- Search space: hidden_dim, n_blocks, n_layers, lr, batch_size.
+* Search space: hidden_dim, n_blocks, n_layers, lr, batch_size.
 
- Objective: validation MSE averaged over a small validation slice using same windowing logic.
+* Objective: validation MSE averaged over a small validation slice using same windowing logic.
 
- Output: best trial params and value (can be extended to multi-metric criteria).
+* Output: best trial params and value (can be extended to multi-metric criteria).
 
 Practical tips :
 
-  For large L (backcast) on CPU, reduce hidden_dim, n_layers, or reduce batch size.
+*  For large L (backcast) on CPU, reduce hidden_dim, n_layers, or reduce batch size.
 
-  Use a GPU (Colab) to accelerate Optuna trials and rolling-origin evaluation.
+*  Use a GPU (Colab) to accelerate Optuna trials and rolling-origin evaluation.
 
-  Benchmark models & evaluation protocol <a name="benchmarks"></a>
+*  Benchmark models & evaluation protocol <a name="benchmarks"></a>
 
 Benchmarks implemented :
 
-  SARIMA (statsmodels) — ARIMA with seasonal suggestions; used as a classic statistical baseline.
+*  SARIMA (statsmodels) — ARIMA with seasonal suggestions; used as a classic statistical baseline.
 
-  Prophet (Meta/FB Prophet) — automatic trend & seasonal decomposition baseline.
+*  Prophet (Meta/FB Prophet) — automatic trend & seasonal decomposition baseline.
 
 Evaluation protocol :
 
-  Rolling-origin (walk-forward) evaluation:
+*  Rolling-origin (walk-forward) evaluation:
 
-  For fairness, every model is retrained on the same growing history up to each origin, and a h-step forecast is produced.
+*  For fairness, every model is retrained on the same growing history up to each origin, and a h-step forecast is produced.
 
-  The set of origins is defined from train_windows_ratio through the end, stepping by step (default h).
+*  The set of origins is defined from train_windows_ratio through the end, stepping by step (default h).
 
 Metrics computed on held-out forecasts across origins:
 
-RMSE, MAE, MAPE (%), sMAPE (%), MASE (uses mean absolute first difference of training series as denominator).
+   * RMSE, MAE, MAPE (%), sMAPE (%), MASE (uses mean absolute first difference of training series as denominator).
 
 Why rolling origin?
 
-   Simulates real forecasting operations and avoids single-split artifacts.
+ *  Simulates real forecasting operations and avoids single-split artifacts.
 
-   Interpretability: decomposition & ablation <a name="interpretability"></a>
+ *  Interpretability: decomposition & ablation 
 
 Decomposition extraction :
 
-  For any input window, the model exposes:
+*  For any input window, the model exposes:
 
-  Per-block theta vectors,
+*  Per-block theta vectors,
 
-  Per-block backcast (how much the block removes from history),
+*  Per-block backcast (how much the block removes from history),
 
-  Per-block forecast (the block’s contribution to the final forecast).
+*  Per-block forecast (the block’s contribution to the final forecast).
 
-  These are available in the code via decompose_model(model, input_window) and saved to ./outputs.
+      These are available in the code via decompose_model(model, input_window) and saved to ./outputs.
 
 Visualization :
 
-   Stacked area plot of per-block forecast contributions (converted back to original scale) shown to the right of the input history. This visually separates trend, seasonality and residual corrections.
+  * Stacked area plot of per-block forecast contributions (converted back to original scale) shown to the right of the input history. This visually separates trend, seasonality and residual corrections.
 
 Ablation
 
 For a chosen input window:
 
-Compute base forecast (all blocks active).
+ * Compute base forecast (all blocks active).
 
 For each block i, set that block’s forecast contribution to zero and compute MSE vs true future.
 
@@ -255,39 +255,40 @@ Report delta MSE for each block — quantifies the block’s importance.
 
 Interpretation guidance
 
-Large changes when removing a trend block indicate the model relies heavily on long-term components.
+* Large changes when removing a trend block indicate the model relies heavily on long-term components.
 
-Large changes when removing seasonality blocks indicate the presence of repeated cycles (daily/weekly).
+* Large changes when removing seasonality blocks indicate the presence of repeated cycles (daily/weekly).
 
-Small changes for a generic block often indicate only fine residual corrections.
+* Small changes for a generic block often indicate only fine residual corrections.
 
-Results summary & how to reproduce :
+* Results summary & how to reproduce :
 
  Files saved by default
 
-  outputs/best_nbeats_full.pt — best N-BEATS model checkpoint
+ * outputs/best_nbeats_full.pt — best N-BEATS model checkpoint
 
-  outputs/sample_forecast.png — sample test forecast vs ground truth
+ * outputs/sample_forecast.png — sample test forecast vs ground truth
 
-  outputs/decomposition_plot.png — stacked block decomposition for a selected window
+ *  outputs/decomposition_plot.png — stacked block decomposition for a selected window
 
-  outputs/ablation_results.json — ablation results per block
+ *  outputs/ablation_results.json — ablation results per block
 
-  outputs/rolling_metrics_nbeats.json — rolling-origin metrics for N-BEATS
+ * outputs/rolling_metrics_nbeats.json — rolling-origin metrics for N-BEATS
 
-  outputs/rolling_metrics_sarima.json — rolling-origin metrics for SARIMA
+ * outputs/rolling_metrics_sarima.json — rolling-origin metrics for SARIMA
 
-  outputs/rolling_metrics_prophet.json — rolling-origin metrics for Prophet (if installed)
+ * outputs/rolling_metrics_prophet.json — rolling-origin metrics for Prophet (if installed)
 
 How to reproduce main experiment
 
- Create virtual environment and install dependencies (see below).
+* Create virtual environment and install dependencies (see below).
 
- Run python nbeats_project_full.py. On CPU the rolling-origin evaluation and Optuna parts can be slow — adjust parameters (reduce epochs, increase step).
+* Run python nbeats_project_full.py. On CPU the rolling-origin evaluation and Optuna parts can be slow — adjust parameters (reduce epochs, increase step).
 
- Open images in ./outputs and JSON metric files for numerical results.
+* Open images in ./outputs and JSON metric files for numerical results.
 
- Example final sample table (generated by the script after a run):
+
+   Example final sample table (generated by the script after a run):
 
 
 | Model   | RMSE | MAE  | MAPE% | sMAPE% | MASE |
