@@ -4,27 +4,28 @@ A complete, end-to-end implementation and evaluation of the N-BEATS architecture
 
 Table of contents
 
-1.Project Summary
+ 1.Project Summary
 
-2.What this repository delivers
+ 2.What this repository delivers
 
-3.Tasks completed — alignment with project brief
+ 3.Tasks completed — alignment with project brief
 
-4.Dataset: generation & characteristics
+ 4.Dataset: generation & characteristics
 
-5.Model implementation (N-BEATS)
+ 5.Model implementation (N-BEATS)
 
-6.Training, optimization & tuning
+ 6.Training, optimization & tuning
 
-7.Benchmark models & evaluation protocol
+ 7.Benchmark models & evaluation protocol
 
-8.Interpretability: decomposition & ablation
+ 8.Interpretability: decomposition & ablation
 
-9.Results summary (how to reproduce)
+ 9.Results summary (how to reproduce)
 
-Project summary :
 
-This project implements an interpretable version of N-BEATS (Neural Basis Expansion Analysis for Time Series Forecasting) and evaluates it thoroughly on a complex, programmatically generated multivariate dataset that includes trend, multiple seasonalities, structural breaks and exogenous signals. The model is trained with advanced optimization techniques and tuned with an automated hyperparameter search. Performance is compared against statistical baselines (SARIMA and Prophet) using a rolling-origin evaluation protocol and a complete metric suite. The model’s internal structure is analyzed by extracting block-level basis decompositions and running ablation studies to quantify each block’s contribution.
+ Project summary :
+
+   This project implements an interpretable version of N-BEATS (Neural Basis Expansion Analysis for Time Series Forecasting) and evaluates it thoroughly on a complex, programmatically generated multivariate dataset that includes trend, multiple seasonalities, structural breaks and exogenous signals. The model is trained with advanced optimization techniques and tuned with an automated hyperparameter search. Performance is compared against statistical baselines (SARIMA and Prophet) using a rolling-origin evaluation protocol and a complete metric suite. The model’s internal structure is analyzed by extracting block-level basis decompositions and running ablation studies to quantify each block’s contribution.
 
 All code and artifacts are intended to be production-quality, easy to run, and reproducible.
 
